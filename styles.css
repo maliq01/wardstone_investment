@@ -1,20 +1,20 @@
-  /* ─── WARDSTONE THEME — derived from logo (navy #07182A / slate #555E5B) ─── */
+  /* ─── WADSTONE THEME — black & gold, matched to the landing page ─── */
   :root,
   [data-theme="light"] {
-    --gold: #12335A;        /* navy — primary accent on light bg */
-    --gold-rgb: 18,51,90;
-    --gold-light: #1D4A7E;
-    --gold-dim: #55605E;    /* slate */
-    --black: #F3F4F2;       /* page background (paper) */
+    --gold: #B4872A;        /* deeper gold — reads clearly on paper bg */
+    --gold-rgb: 180,135,42;
+    --gold-light: #D4A537;
+    --gold-dim: #A89A7C;
+    --black: #F7F5F0;       /* page background (warm paper) */
     --black2: #FFFFFF;      /* panels */
     --dark: #FFFFFF;
     --dark2: #FFFFFF;
     --panel: #FFFFFF;
-    --border: rgba(18,51,90,0.16);
-    --border2: rgba(10,20,30,0.08);
-    --text: #10202E;
-    --text2: #4B5964;
-    --text3: #838C8A;
+    --border: rgba(180,135,42,0.22);
+    --border2: rgba(10,10,10,0.08);
+    --text: #16140E;
+    --text2: #524C3E;
+    --text3: #8C8672;
     --success: #1E8E5A;
     --danger: #C0392B;
     --info: #2E6FA8;
@@ -22,20 +22,20 @@
     --radius2: 14px;
   }
   [data-theme="dark"] {
-    --gold: #A7B0AB;        /* pale slate — primary accent on dark bg */
-    --gold-rgb: 167,176,171;
-    --gold-light: #D6DAD5;
-    --gold-dim: #6B756F;
-    --black: #07182A;       /* navy page background, from logo */
-    --black2: #0B2138;
-    --dark: #0F2740;
-    --dark2: #142E4A;
-    --panel: #142E4A;
-    --border: rgba(167,176,171,0.18);
-    --border2: rgba(255,255,255,0.06);
-    --text: #EDEEEC;
-    --text2: #A9B3AF;
-    --text3: #63706B;
+    --gold: #D4A537;        /* signature gold — primary accent on black bg */
+    --gold-rgb: 212,165,55;
+    --gold-light: #E8C877;
+    --gold-dim: #8A7230;
+    --black: #0A0A0A;       /* true black page background, from landing page */
+    --black2: #111111;
+    --dark: #141414;
+    --dark2: #161616;
+    --panel: #161616;
+    --border: rgba(212,165,55,0.16);
+    --border2: rgba(255,255,255,0.07);
+    --text: #F5F5F1;
+    --text2: #A3A39C;
+    --text3: #656560;
     --success: #3DB87A;
     --danger: #E05252;
     --info: #4A9EE8;
@@ -69,10 +69,11 @@
   }
   .btn-ghost:hover { border-color: var(--gold); color: var(--gold); }
   .btn-gold {
-    background: var(--gold); color: var(--black);
-    font-weight: 600;
+    background: linear-gradient(135deg, var(--gold-light), var(--gold));
+    color: #100C02; font-weight: 600;
+    box-shadow: 0 0 0 1px rgba(var(--gold-rgb),0.12);
   }
-  .btn-gold:hover { background: var(--gold-light); }
+  .btn-gold:hover { filter: brightness(1.08); box-shadow: 0 4px 18px rgba(var(--gold-rgb),0.28); }
   .btn-dark {
     background: var(--panel); color: var(--text);
     border: 1px solid var(--border2);
@@ -152,8 +153,8 @@
     background: var(--black); position: sticky; top: 0; z-index: 40;
   }
   .topbar-title {
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 22px; font-weight: 400;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 22px; font-weight: 600;
   }
   .topbar-right { display: flex; align-items: center; gap: 16px; }
   .badge {
@@ -186,8 +187,8 @@
     margin-bottom: 20px;
   }
   .card-title {
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 18px; font-weight: 400;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 18px; font-weight: 600;
   }
   .card-sub { font-size: 12px; color: var(--text3); margin-top: 2px; }
 
@@ -208,8 +209,8 @@
   .stat-card.info::before { background: var(--info); }
   .stat-label { font-size: 11px; color: var(--text3); letter-spacing: 0.1em; text-transform: uppercase; font-family: 'DM Mono', monospace; margin-bottom: 10px; }
   .stat-val {
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 30px; font-weight: 300; color: var(--text);
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 30px; font-weight: 600; color: var(--text);
   }
   .stat-change { font-size: 12px; margin-top: 6px; }
   .stat-change.up { color: var(--success); }
@@ -253,25 +254,25 @@
   #auth-page.active { display: flex; }
 
   .auth-brand-panel {
-    flex: 0 0 40%; background: #07182A; color: #fff;
+    flex: 0 0 40%; background: #0A0A0A; color: #fff;
     display: flex; align-items: center; padding: 56px 48px;
     position: relative; overflow: hidden; min-height: 280px;
   }
   .auth-brand-panel::before {
     content: ''; position: absolute; inset: 0; pointer-events: none;
-    background: radial-gradient(ellipse 60% 80% at 20% 30%, rgba(201,168,76,0.10) 0%, transparent 60%);
+    background: radial-gradient(ellipse 60% 80% at 20% 30%, rgba(212,165,55,0.14) 0%, transparent 60%);
   }
   .auth-brand-inner { position: relative; z-index: 1; max-width: 380px; }
   .auth-brand-title {
-    font-family: 'Cormorant Garamond', serif; font-weight: 400;
+    font-family: 'Space Grotesk', sans-serif; font-weight: 600;
     font-size: 32px; line-height: 1.25; margin: 28px 0 16px;
   }
-  .auth-brand-tagline { font-size: 14px; line-height: 1.7; color: #B7C0C8; margin-bottom: 28px; }
+  .auth-brand-tagline { font-size: 14px; line-height: 1.7; color: #B9B9B2; margin-bottom: 28px; }
   .auth-brand-points { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 13px; }
-  .auth-brand-points li { font-size: 13px; color: #D5DADD; padding-left: 20px; position: relative; }
+  .auth-brand-points li { font-size: 13px; color: #D8D8D2; padding-left: 20px; position: relative; }
   .auth-brand-points li::before {
     content: ''; position: absolute; left: 0; top: 6px;
-    width: 6px; height: 6px; border-radius: 1px; background: #C9A84C;
+    width: 6px; height: 6px; border-radius: 1px; background: #D4A537;
   }
 
   .auth-form-panel {
@@ -288,7 +289,7 @@
     position: relative; z-index: 2;
   }
   .auth-logo { display: flex; align-items: center; gap: 12px; margin-bottom: 32px; }
-  .auth-title { font-family: 'Cormorant Garamond', serif; font-size: 28px; font-weight: 400; margin-bottom: 8px; }
+  .auth-title { font-family: 'Space Grotesk', sans-serif; font-size: 28px; font-weight: 600; margin-bottom: 8px; }
   .auth-sub { font-size: 14px; color: var(--text2); margin-bottom: 28px; }
   .auth-switch { text-align: center; margin-top: 20px; font-size: 13px; color: var(--text3); }
   .auth-switch a { color: var(--gold); cursor: pointer; }
@@ -365,7 +366,7 @@
     max-height: 90vh; overflow-y: auto;
     animation: fadeUp 0.2s ease;
   }
-  .modal-title { font-family: 'Cormorant Garamond', serif; font-size: 22px; margin-bottom: 20px; }
+  .modal-title { font-family: 'Space Grotesk', sans-serif; font-size: 22px; font-weight: 600; margin-bottom: 20px; }
   .modal-footer { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
 
   /* PORTFOLIO CHART (CSS only) */
@@ -377,6 +378,50 @@
   }
   .mini-bar:hover { opacity: 1; }
   .mini-bar.neg { background: var(--danger); }
+
+  /* PERFORMANCE BARS — glossy 3D gold */
+  .perf-bar {
+    flex: 1; border-radius: 4px 4px 1px 1px; position: relative;
+    background: linear-gradient(180deg, var(--gold-light) 0%, var(--gold) 45%, var(--gold-dim) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.45),
+      inset 1px 0 0 rgba(255,255,255,0.12),
+      inset -2px 0 4px rgba(0,0,0,0.22),
+      0 3px 8px rgba(var(--gold-rgb),0.22);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+    cursor: default;
+  }
+  .perf-bar:hover {
+    transform: translateY(-3px);
+    filter: brightness(1.06);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.5),
+      inset 1px 0 0 rgba(255,255,255,0.14),
+      inset -2px 0 4px rgba(0,0,0,0.22),
+      0 8px 16px rgba(var(--gold-rgb),0.32);
+  }
+  .perf-bar.down {
+    background: linear-gradient(180deg, #F08C7C 0%, var(--danger) 45%, #8A2E22 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.35),
+      inset 1px 0 0 rgba(255,255,255,0.10),
+      inset -2px 0 4px rgba(0,0,0,0.22),
+      0 3px 8px rgba(224,82,82,0.2);
+  }
+  .perf-bar.down:hover {
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.4),
+      inset 1px 0 0 rgba(255,255,255,0.1),
+      inset -2px 0 4px rgba(0,0,0,0.22),
+      0 8px 16px rgba(224,82,82,0.28);
+  }
+  .perf-bar.current {
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.5),
+      inset 1px 0 0 rgba(255,255,255,0.14),
+      inset -2px 0 4px rgba(0,0,0,0.22),
+      0 0 18px rgba(var(--gold-rgb),0.4);
+  }
 
   .sparkline { display: flex; align-items: flex-end; gap: 2px; height: 30px; }
   .spark { width: 4px; background: var(--gold); border-radius: 1px; opacity: 0.7; }

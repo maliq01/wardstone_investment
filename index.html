@@ -10,7 +10,7 @@
 <meta name="logtail-token" content="">
 <title>Wadstone Investment | Premier Hedge Fund</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Mono:wght@300;400;500&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Mono:wght@300;400;500&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="styles.css" />
 <!-- Set theme before first paint to avoid flash -->
 <script>
@@ -496,19 +496,19 @@
             </div>
             <span class="badge badge-success">+18.4%</span>
           </div>
-          <div style="display:flex;align-items:flex-end;gap:4px;height:100px">
-            <div style="flex:1;background:var(--gold);opacity:0.4;height:45%;border-radius:3px 3px 0 0"></div>
-            <div style="flex:1;background:var(--gold);opacity:0.5;height:55%;border-radius:3px 3px 0 0"></div>
-            <div style="flex:1;background:var(--gold);opacity:0.5;height:48%;border-radius:3px 3px 0 0"></div>
-            <div style="flex:1;background:var(--gold);opacity:0.6;height:60%;border-radius:3px 3px 0 0"></div>
-            <div style="flex:1;background:var(--danger);opacity:0.6;height:40%;border-radius:3px 3px 0 0"></div>
-            <div style="flex:1;background:var(--gold);opacity:0.6;height:65%;border-radius:3px 3px 0 0"></div>
-            <div style="flex:1;background:var(--gold);opacity:0.7;height:70%;border-radius:3px 3px 0 0"></div>
-            <div style="flex:1;background:var(--gold);opacity:0.7;height:75%;border-radius:3px 3px 0 0"></div>
-            <div style="flex:1;background:var(--gold);opacity:0.8;height:80%;border-radius:3px 3px 0 0"></div>
-            <div style="flex:1;background:var(--danger);opacity:0.6;height:38%;border-radius:3px 3px 0 0"></div>
-            <div style="flex:1;background:var(--gold);opacity:0.9;height:88%;border-radius:3px 3px 0 0"></div>
-            <div style="flex:1;background:var(--gold);height:95%;border-radius:3px 3px 0 0"></div>
+          <div style="display:flex;align-items:flex-end;gap:6px;height:100px;padding:0 2px 4px">
+            <div class="perf-bar" style="height:45%"></div>
+            <div class="perf-bar" style="height:55%"></div>
+            <div class="perf-bar" style="height:48%"></div>
+            <div class="perf-bar" style="height:60%"></div>
+            <div class="perf-bar down" style="height:40%"></div>
+            <div class="perf-bar" style="height:65%"></div>
+            <div class="perf-bar" style="height:70%"></div>
+            <div class="perf-bar" style="height:75%"></div>
+            <div class="perf-bar" style="height:80%"></div>
+            <div class="perf-bar down" style="height:38%"></div>
+            <div class="perf-bar" style="height:88%"></div>
+            <div class="perf-bar current" style="height:95%"></div>
           </div>
           <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--text3);font-family:'DM Mono',monospace">
             <span>Jun</span><span>Jul</span><span>Aug</span><span>Sep</span><span>Oct</span><span>Nov</span><span>Dec</span><span>Jan</span><span>Feb</span><span>Mar</span><span>Apr</span><span>May</span>
@@ -520,14 +520,14 @@
             <div class="card-title">Asset Allocation</div>
           </div>
           <div class="alloc-bar">
-            <div class="alloc-seg" style="flex:45;background:#C9A84C"></div>
+            <div class="alloc-seg" style="flex:45;background:#D4A537"></div>
             <div class="alloc-seg" style="flex:25;background:#4A9EE8"></div>
             <div class="alloc-seg" style="flex:15;background:#3DB87A"></div>
             <div class="alloc-seg" style="flex:10;background:#E05252"></div>
             <div class="alloc-seg" style="flex:5;background:#8B6E2E"></div>
           </div>
           <div class="alloc-legend">
-            <div class="alloc-item"><div class="alloc-dot" style="background:#C9A84C"></div> Equities 45%</div>
+            <div class="alloc-item"><div class="alloc-dot" style="background:#D4A537"></div> Equities 45%</div>
             <div class="alloc-item"><div class="alloc-dot" style="background:#4A9EE8"></div> Fixed Income 25%</div>
             <div class="alloc-item"><div class="alloc-dot" style="background:#3DB87A"></div> Alternatives 15%</div>
             <div class="alloc-item"><div class="alloc-dot" style="background:#E05252"></div> Commodities 10%</div>
@@ -786,7 +786,7 @@
           <div style="display:flex;flex-direction:column;gap:16px">
             <div class="form-group">
               <label>Available Balance</label>
-              <div style="font-family:'Cormorant Garamond',serif;font-size:28px;color:var(--gold)" id="wd-avail">$0.00</div>
+              <div style="font-family:'Space Grotesk',sans-serif;font-size:28px;font-weight:600;color:var(--gold)" id="wd-avail">$0.00</div>
             </div>
             <div class="form-group">
               <label>Withdrawal Amount (USD)</label>
@@ -1176,7 +1176,7 @@
         <div class="table-wrap">
           <table>
             <thead>
-              <tr><th>Date</th><th>Client</th><th>Type</th><th>Amount</th><th>Method</th><th>Status</th><th>Action</th></tr>
+              <tr><th>Date</th><th>Client</th><th>Type</th><th>Amount</th><th>Method</th><th>Status</th><th>Proof</th><th>Action</th></tr>
             </thead>
             <tbody id="admin-txn-table"></tbody>
           </table>

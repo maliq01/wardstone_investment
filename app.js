@@ -371,7 +371,7 @@ async function db_getTransactions(investorId, limit = 50) {
 }
 async function db_getPendingTransactions() {
   const { data, error } = await sb.from('transactions')
-    .select('*, investors(name,email)')
+    .select('*')
     .eq('status', 'pending')
     .order('created_at', { ascending: false });
   if (error) console.error('db_getPendingTransactions:', error);
@@ -390,6 +390,19 @@ async function db_updateTransaction(id, updates) {
 
 // ── ATOMIC DEPOSIT APPROVAL (calls DB function) ──
 async function db_approveDeposit(txnId, investorId, amount, method, reference, approvedBy) {
+  // process_deposit INSERTS a new transaction row rather than updating the
+  // pending one — reusing the same `reference` collides with the pending
+  // row's own reference (unique constraint) and the whole call gets rejected.
+  // Fix: temporarily free the reference on the pending row, let the RPC
+  // create the real approved record with the original reference, carry
+  // over the receipt/notes from the pending row, then remove it. If the
+  // RPC fails, the rename is reverted so nothing is lost.
+  let pendingExtras = null;
+  if (txnId) {
+    const { data: pendingTxn } = await sb.from('transactions').select('receipt_path, notes').eq('id', txnId).single();
+    pendingExtras = pendingTxn || null;
+    await sb.from('transactions').update({ reference: reference + '-PENDING-' + txnId.slice(0,8) }).eq('id', txnId);
+  }
   const { data, error } = await sb.rpc('process_deposit', {
     p_investor_id: investorId,
     p_amount: amount,
@@ -398,14 +411,31 @@ async function db_approveDeposit(txnId, investorId, amount, method, reference, a
     p_notes: null,
     p_approved_by: approvedBy
   });
-  if (error) throw error;
-  // Mark original pending txn as approved
-  await sb.from('transactions').update({ status: 'approved', approved_by: approvedBy, approved_at: new Date().toISOString() }).eq('id', txnId);
+  if (error) {
+    if (txnId) await sb.from('transactions').update({ reference }).eq('id', txnId); // revert, keep the pending request intact
+    throw error;
+  }
+  if (txnId) {
+    // Carry the receipt (and any client notes) over to the new approved record.
+    if (pendingExtras && pendingExtras.receipt_path) {
+      try {
+        await sb.from('transactions')
+          .update({ receipt_path: pendingExtras.receipt_path, notes: pendingExtras.notes })
+          .eq('investor_id', investorId).eq('reference', reference).eq('type', 'deposit')
+          .order('created_at', { ascending: false }).limit(1);
+      } catch (e) { console.warn('Could not carry receipt_path to approved transaction:', e); }
+    }
+    // The RPC's insert is now the authoritative approved record — remove the superseded pending row.
+    await sb.from('transactions').delete().eq('id', txnId);
+  }
   return data;
 }
 
 // ── ATOMIC WITHDRAWAL APPROVAL ──
 async function db_approveWithdrawal(txnId, investorId, amount, method, reference, approvedBy) {
+  if (txnId) {
+    await sb.from('transactions').update({ reference: reference + '-PENDING-' + txnId.slice(0,8) }).eq('id', txnId);
+  }
   const { data, error } = await sb.rpc('process_withdrawal', {
     p_investor_id: investorId,
     p_amount: amount,
@@ -413,8 +443,13 @@ async function db_approveWithdrawal(txnId, investorId, amount, method, reference
     p_reference: reference,
     p_approved_by: approvedBy
   });
-  if (error) throw error;
-  await sb.from('transactions').update({ status: 'approved', approved_by: approvedBy, approved_at: new Date().toISOString() }).eq('id', txnId);
+  if (error) {
+    if (txnId) await sb.from('transactions').update({ reference }).eq('id', txnId);
+    throw error;
+  }
+  if (txnId) {
+    await sb.from('transactions').delete().eq('id', txnId);
+  }
   return data;
 }
 
@@ -482,7 +517,11 @@ async function db_createJournalEntry(entry) {
 async function db_getFundSettings() {
   const { data } = await sb.from('fund_settings').select('*');
   const settings = {};
-  (data || []).forEach(row => { settings[row.key] = typeof row.value === 'string' ? JSON.parse(row.value) : row.value; });
+  (data || []).forEach(row => {
+    if (typeof row.value !== 'string') { settings[row.key] = row.value; return; }
+    try { settings[row.key] = JSON.parse(row.value); }
+    catch(e) { settings[row.key] = row.value; } // not JSON-encoded — use the raw string as-is
+  });
   return settings;
 }
 async function db_saveFundSetting(key, value, updatedBy) {
@@ -1188,7 +1227,15 @@ async function submitDeposit() {
     // depositReceipt holds the file in memory until this point only.
     if (depositReceipt && depositReceipt.data) {
       try {
-        await uploadDocToStorage(u.id, 'receipt_' + txn.id, depositReceipt.data, depositReceipt.name, depositReceipt.type);
+        const receiptPath = await uploadDocToStorage(u.id, 'receipt_' + txn.id, depositReceipt.data, depositReceipt.name, depositReceipt.type);
+        // Persist the path so admins can actually retrieve the file later —
+        // previously this was uploaded but the path was discarded, so there
+        // was no way to find it again from the admin UI.
+        try {
+          await db_updateTransaction(txn.id, { receipt_path: receiptPath });
+        } catch (colErr) {
+          console.warn('Could not save receipt_path (column may not exist yet on transactions table):', colErr);
+        }
       } catch (e) { console.warn('Receipt upload failed:', e); }
     }
 
@@ -1589,11 +1636,17 @@ function searchClients(q) {
   renderClientRows(document.getElementById('admin-clients-table'), clients);
 }
 
-function viewClientDetail(uid) {
+async function viewClientDetail(uid) {
   const u = DB.users.find(x => x.id === uid);
   if (!u) return;
   showPage('admin-client-detail');
-  const txns = u.transactions || [];
+  document.getElementById('admin-client-detail-content').innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3)">Loading client...</div>';
+
+  // Fetch this client's real transactions live from Supabase — was previously
+  // always empty because DB.users[].transactions is never populated.
+  let txns = [];
+  try { txns = await db_getTransactions(uid, 100); } catch(e) { console.warn('Could not load client transactions:', e); }
+
   document.getElementById('admin-client-detail-content').innerHTML = `
     <div class="stats-grid" style="margin-bottom:20px">
       <div class="stat-card gold"><div class="stat-label">Balance</div><div class="stat-val">${fmt(u.balance||0)}</div></div>
@@ -1658,16 +1711,17 @@ function viewClientDetail(uid) {
       <div class="card-title" style="margin-bottom:16px">Transaction History</div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Method</th><th>Status</th><th>Ref</th><th>Action</th></tr></thead>
+          <thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Method</th><th>Status</th><th>Ref</th><th>Proof</th><th>Action</th></tr></thead>
           <tbody>
-            ${txns.length ? [...txns].reverse().map(t => `
+            ${txns.length ? txns.map(t => `
               <tr>
-                <td style="font-size:12px;font-family:'DM Mono',monospace">${fmtDate(t.date)}</td>
+                <td style="font-size:12px;font-family:'DM Mono',monospace">${fmtDate(t.created_at)}</td>
                 <td><span class="badge ${t.type==='deposit'?'badge-success':'badge-info'}">${capitalize(t.type)}</span></td>
                 <td style="color:${t.type==='deposit'?'var(--success)':'var(--danger)'}">${t.type==='deposit'?'+':'-'}${fmt(t.amount)}</td>
                 <td style="color:var(--text3)">${t.method||'—'}</td>
                 <td><span class="badge ${statusBadge(t.status)}">${capitalize(t.status)}</span></td>
-                <td style="font-size:11px;color:var(--text3);font-family:'DM Mono',monospace">${t.ref}</td>
+                <td style="font-size:11px;color:var(--text3);font-family:'DM Mono',monospace">${t.reference}</td>
+                <td>${t.receipt_path ? `<button class="btn btn-ghost btn-sm" style="padding:4px 10px" onclick="viewDoc(event)" data-path="${sanitize(t.receipt_path)}" data-key="receipt">View</button>` : '<span style="color:var(--text3);font-size:12px">—</span>'}</td>
                 <td>
                   ${t.status==='pending'?`
                     <div style="display:flex;gap:4px">
@@ -1676,7 +1730,7 @@ function viewClientDetail(uid) {
                     </div>` : '—'}
                 </td>
               </tr>
-            `).join('') : '<tr><td colspan="7"><div class="empty"><p>No transactions</p></div></td></tr>'}
+            `).join('') : '<tr><td colspan="8"><div class="empty"><p>No transactions</p></div></td></tr>'}
           </tbody>
         </table>
       </div>
@@ -1850,21 +1904,36 @@ async function renderAdminKYC() {
 
 async function renderAdminTransactions() {
   const tbody = document.getElementById('admin-txn-table');
-  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:16px;color:var(--text3)">Loading...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:16px;color:var(--text3)">Loading...</td></tr>';
 
-  // Fetch all transactions live from Supabase (joins investor name via foreign key)
+  // Fetch transactions on their own — no embedded join to `investors`.
+  // The joined query (transactions + investors in one call) depends on
+  // PostgREST recognizing a foreign-key relationship between the two
+  // tables; if that relationship isn't set up cleanly it fails outright
+  // with "Failed to load transactions". Fetching plain and matching
+  // names from the investors we already have loaded sidesteps that.
   const { data: allTxns, error } = await sb
     .from('transactions')
-    .select('*, investors(id, name, email)')
+    .select('*')
     .order('created_at', { ascending: false })
     .limit(200);
 
-  if (error) { tbody.innerHTML = '<tr><td colspan="7"><div class="empty"><p>Failed to load transactions</p></div></td></tr>'; return; }
-  if (!allTxns || !allTxns.length) { tbody.innerHTML = '<tr><td colspan="7"><div class="empty"><p>No transactions</p></div></td></tr>'; return; }
+  if (error) {
+    console.error('renderAdminTransactions:', error);
+    tbody.innerHTML = '<tr><td colspan="8"><div class="empty"><p>Failed to load transactions — ' + sanitize(error.message||'unknown error') + '</p></div></td></tr>';
+    return;
+  }
+  if (!allTxns || !allTxns.length) { tbody.innerHTML = '<tr><td colspan="8"><div class="empty"><p>No transactions</p></div></td></tr>'; return; }
+
+  // Ensure we have investor names to match against — refresh if empty
+  if (!DB.users || !DB.users.length) { await syncDBFromSupabase(); }
+  const investorMap = {};
+  (DB.users||[]).forEach(u => { investorMap[u.id] = u; });
 
   tbody.innerHTML = allTxns.map(t => {
-    const investorName = t.investors?.name || '—';
-    const investorId   = t.investors?.id   || t.investor_id;
+    const investor    = investorMap[t.investor_id];
+    const investorName = investor?.name || '—';
+    const investorId   = t.investor_id;
     return `
     <tr>
       <td style="font-size:12px;font-family:'DM Mono',monospace">${fmtDate(t.created_at)}</td>
@@ -1873,6 +1942,7 @@ async function renderAdminTransactions() {
       <td style="color:${t.type==='deposit'?'var(--success)':'var(--danger)'}">${t.type==='deposit'?'+':'-'}${fmt(t.amount)}</td>
       <td style="color:var(--text3)">${sanitize(t.method||'—')}</td>
       <td><span class="badge ${statusBadge(t.status)}">${capitalize(t.status)}</span></td>
+      <td>${t.receipt_path ? `<button class="btn btn-ghost btn-sm" style="padding:4px 10px" onclick="viewDoc(event)" data-path="${sanitize(t.receipt_path)}" data-key="receipt">View</button>` : '<span style="color:var(--text3);font-size:12px">—</span>'}</td>
       <td>
         ${t.status==='pending'?`
           <div style="display:flex;gap:4px">
@@ -2420,7 +2490,7 @@ function showRecoveryPasswordUI() {
   document.body.innerHTML = `
     <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--darker,#0a0a0a)">
       <div style="background:var(--dark,#111);border-radius:12px;padding:36px;width:100%;max-width:400px;border:1px solid var(--border,#222)">
-        <div style="font-family:'Cormorant Garamond',serif;font-size:22px;color:#C9A84C;font-weight:600;margin-bottom:4px">Wadstone Investment</div>
+        <div style="font-family:'Space Grotesk',sans-serif;font-size:22px;color:#D4A537;font-weight:600;margin-bottom:4px">Wadstone Investment</div>
         <div style="font-size:13px;color:#888;margin-bottom:24px">Set your new password</div>
         <div style="display:flex;flex-direction:column;gap:14px">
           <div>
@@ -2435,7 +2505,7 @@ function showRecoveryPasswordUI() {
           </div>
           <div id="recovery-err" style="display:none;color:#e05252;font-size:13px"></div>
           <button id="recovery-btn" onclick="submitRecoveryPassword()"
-            style="width:100%;padding:12px;background:#C9A84C;color:#000;border:none;border-radius:8px;font-weight:600;font-size:14px;cursor:pointer">
+            style="width:100%;padding:12px;background:#D4A537;color:#000;border:none;border-radius:8px;font-weight:600;font-size:14px;cursor:pointer">
             Set New Password
           </button>
         </div>
@@ -2788,8 +2858,8 @@ async function renderFeeSummary() {
   </div>`).join('');
 }
 
-function buildStatementHTML(u, period) {
-  const txns = (u.transactions||[]).filter(t=>t.date&&t.date.startsWith(period));
+function buildStatementHTML(u, period, txns) {
+  txns = (txns||[]).filter(t=>t.created_at&&t.created_at.startsWith(period));
   const fmtAmt = n=>'$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
   // All user-supplied fields sanitized — this HTML is written to a new window via document.write
   const sName    = sanitize(u.name || '');
@@ -2799,14 +2869,14 @@ function buildStatementHTML(u, period) {
   const txnRows = txns.length ? txns.map(t=>{
     const isCredit = ['deposit','return'].includes(t.type);
     return `<tr>
-    <td style="padding:8px;border-bottom:1px solid #2a2a2a;font-size:12px">${sanitize(fmtDate(t.date))}</td>
+    <td style="padding:8px;border-bottom:1px solid #2a2a2a;font-size:12px">${sanitize(fmtDate(t.created_at))}</td>
     <td style="padding:8px;border-bottom:1px solid #2a2a2a;font-size:12px;text-transform:capitalize">${sanitize(t.type||'')}</td>
-    <td style="padding:8px;border-bottom:1px solid #2a2a2a;font-size:12px">${sanitize(t.ref||t.reference||'—')}</td>
+    <td style="padding:8px;border-bottom:1px solid #2a2a2a;font-size:12px">${sanitize(t.reference||'—')}</td>
     <td style="padding:8px;border-bottom:1px solid #2a2a2a;font-size:12px;color:${isCredit?'#3DB87A':'#E05252'}">${isCredit?'+':'-'}${sanitize(fmtAmt(t.amount||0))}</td>
   </tr>`;
   }).join('') : `<tr><td colspan="4" style="padding:16px;text-align:center;color:#555;font-size:12px">No transactions this period</td></tr>`;
-  return `<div style="border-bottom:2px solid #C9A84C;padding-bottom:20px;margin-bottom:24px;display:flex;justify-content:space-between;align-items:flex-start">
-    <div><div style="font-family:'Cormorant Garamond',serif;font-size:24px;color:#C9A84C;font-weight:600">Wadstone Investment</div><div style="font-size:11px;color:#666;margin-top:4px">Private Capital Partnership · Nairobi, Kenya</div></div>
+  return `<div style="border-bottom:2px solid #D4A537;padding-bottom:20px;margin-bottom:24px;display:flex;justify-content:space-between;align-items:flex-start">
+    <div><div style="font-family:'Space Grotesk',sans-serif;font-size:24px;color:#D4A537;font-weight:600">Wadstone Investment</div><div style="font-size:11px;color:#666;margin-top:4px">Private Capital Partnership · Nairobi, Kenya</div></div>
     <div style="text-align:right"><div style="font-size:13px;font-weight:600">Account Statement</div><div style="font-size:11px;color:#666">${sPeriod}</div></div>
   </div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px">
@@ -2814,7 +2884,7 @@ function buildStatementHTML(u, period) {
     <div style="text-align:right"><div style="font-size:11px;color:#888;margin-bottom:4px">ACCOUNT SUMMARY</div>
       <div style="font-size:13px">Deposited: <strong style="color:#4A9EE8">${sanitize(fmtAmt(u.deposited||0))}</strong></div>
       <div style="font-size:13px">Returns: <strong style="color:#3DB87A">${sanitize(fmtAmt(u.returns||0))}</strong></div>
-      <div style="font-size:14px;margin-top:6px">Net Balance: <strong style="color:#C9A84C;font-size:16px">${sanitize(fmtAmt(u.balance||0))}</strong></div>
+      <div style="font-size:14px;margin-top:6px">Net Balance: <strong style="color:#D4A537;font-size:16px">${sanitize(fmtAmt(u.balance||0))}</strong></div>
     </div>
   </div>
   <div style="font-size:12px;font-weight:600;margin-bottom:10px;color:#888;text-transform:uppercase;letter-spacing:0.05em">Transactions — ${sPeriod}</div>
@@ -2828,17 +2898,19 @@ function buildStatementHTML(u, period) {
   </div>`;
 }
 
-function previewStatement() {
+async function previewStatement() {
   const period = document.getElementById('acc-stmt-period').value;
   const clientId = document.getElementById('acc-stmt-client').value;
   if (!period) { toast('Select a period','error'); return; }
   const clients = clientId==='all' ? getClients() : [DB.users.find(u=>u.id===clientId)].filter(Boolean);
   if (!clients.length) { toast('No clients found','error'); return; }
   document.getElementById('acc-stmt-preview').style.display='block';
-  document.getElementById('acc-stmt-content').innerHTML=buildStatementHTML(clients[0],period);
+  document.getElementById('acc-stmt-content').innerHTML='<div style="text-align:center;padding:40px;color:var(--text3)">Loading...</div>';
+  const txns = await db_getTransactions(clients[0].id, 200);
+  document.getElementById('acc-stmt-content').innerHTML=buildStatementHTML(clients[0],period,txns);
 }
 
-function generateStatement() {
+async function generateStatement() {
   const period = document.getElementById('acc-stmt-period').value;
   const clientId = document.getElementById('acc-stmt-client').value;
   if (!period) { toast('Select a period','error'); return; }
@@ -2846,28 +2918,42 @@ function generateStatement() {
   if (!clients.length) { toast('No clients found','error'); return; }
   const win=window.open('','_blank');
   win.document.write(`<!DOCTYPE html><html><head><title>Statement ${period}</title>
-    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600&family=Outfit:wght@300;400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Outfit:wght@300;400;500&display=swap" rel="stylesheet">
     <style>body{font-family:'Outfit',sans-serif;background:#fff;color:#111;padding:40px;}@media print{body{padding:20px}}</style></head><body>`);
-  clients.forEach((u,i)=>{ if (i>0) win.document.write('<div style="page-break-before:always"></div>'); win.document.write(buildStatementHTML(u,period)); });
+  for (let i=0; i<clients.length; i++) {
+    const u = clients[i];
+    if (i>0) win.document.write('<div style="page-break-before:always"></div>');
+    const txns = await db_getTransactions(u.id, 200);
+    win.document.write(buildStatementHTML(u,period,txns));
+  }
   win.document.write('</body></html>'); win.document.close(); win.print();
   toast('Statement opened — Save as PDF using print dialog ✓','success');
   addAuditLog('Statement Generated','Period: '+period+' — '+(clientId==='all'?'All clients':clients[0]?.name));
 }
 
-function viewClientLedger(uid) {
+async function viewClientLedger(uid) {
   const u=DB.users.find(x=>x.id===uid); if (!u) return;
-  const txns=(u.transactions||[]).slice().reverse();
-  const fmt=n=>'$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-  const rows=txns.map(t=>`<tr>
-    <td style="font-size:11px;font-family:'DM Mono',monospace">${sanitize(fmtDate(t.date))}</td>
-    <td style="font-size:12px;text-transform:capitalize">${sanitize(t.type)}</td>
-    <td style="font-size:12px">${sanitize(t.ref||'—')}</td>
-    <td style="color:${['deposit','return'].includes(t.type)?'var(--success)':'var(--danger)'}">${['deposit','return'].includes(t.type)?'+':'-'}${sanitize(fmt(t.amount||0))}</td>
-    <td style="font-size:11px;color:var(--text3)">${sanitize(t.notes||'—')}</td>
-  </tr>`).join('')||'<tr><td colspan="5" style="text-align:center;padding:16px;color:var(--text3)">No transactions</td></tr>';
   const existing=document.getElementById('modal-client-ledger'); if (existing) existing.remove();
   document.body.insertAdjacentHTML('beforeend',`<div class="modal-overlay active" id="modal-client-ledger">
     <div class="modal" style="max-width:800px;max-height:85vh;overflow-y:auto">
+      <div class="modal-title">${sanitize(u.name)} — Full Ledger</div>
+      <div style="text-align:center;padding:30px;color:var(--text3)">Loading...</div>
+    </div>
+  </div>`);
+
+  const txns = (await db_getTransactions(uid, 200));
+  const fmt=n=>'$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const rows=txns.map(t=>`<tr>
+    <td style="font-size:11px;font-family:'DM Mono',monospace">${sanitize(fmtDate(t.created_at))}</td>
+    <td style="font-size:12px;text-transform:capitalize">${sanitize(t.type)}</td>
+    <td style="font-size:12px">${sanitize(t.reference||'—')}</td>
+    <td style="color:${['deposit','return'].includes(t.type)?'var(--success)':'var(--danger)'}">${['deposit','return'].includes(t.type)?'+':'-'}${sanitize(fmt(t.amount||0))}</td>
+    <td style="font-size:11px;color:var(--text3)">${sanitize(t.notes||'—')}</td>
+  </tr>`).join('')||'<tr><td colspan="5" style="text-align:center;padding:16px;color:var(--text3)">No transactions</td></tr>';
+
+  const modal = document.getElementById('modal-client-ledger');
+  if (!modal) return; // user closed it while loading
+  modal.querySelector('.modal').innerHTML = `
       <div class="modal-title">${sanitize(u.name)} — Full Ledger</div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
         <div style="background:var(--dark);border-radius:var(--radius);padding:14px;text-align:center"><div style="font-size:11px;color:var(--text3)">Total Deposited</div><div style="font-size:18px;color:var(--info);font-weight:600;margin-top:4px">${sanitize(fmt(u.deposited||0))}</div></div>
@@ -2881,16 +2967,15 @@ function viewClientLedger(uid) {
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="document.getElementById('modal-client-ledger').remove()">Close</button>
         <button class="btn btn-gold btn-sm" onclick="printClientLedger('${sanitize(u.id)}')">Print / PDF</button>
-      </div>
-    </div>
-  </div>`);
+      </div>`;
 }
 
-function printClientLedger(uid) {
+async function printClientLedger(uid) {
   const u=DB.users.find(x=>x.id===uid); if (!u) return;
   const period=new Date().toISOString().slice(0,7);
+  const txns = await db_getTransactions(uid, 200);
   const win=window.open('','_blank');
-  win.document.write(`<!DOCTYPE html><html><head><title>Ledger - ${sanitize(u.name)}</title><style>body{font-family:sans-serif;padding:40px;color:#111;}table{width:100%;border-collapse:collapse;}th,td{padding:8px;border-bottom:1px solid #eee;text-align:left;font-size:12px;}th{background:#f5f5f5;}</style></head><body>${buildStatementHTML(u,period)}</body></html>`);
+  win.document.write(`<!DOCTYPE html><html><head><title>Ledger - ${sanitize(u.name)}</title><style>body{font-family:sans-serif;padding:40px;color:#111;}table{width:100%;border-collapse:collapse;}th,td{padding:8px;border-bottom:1px solid #eee;text-align:left;font-size:12px;}th{background:#f5f5f5;}</style></head><body>${buildStatementHTML(u,period,txns)}</body></html>`);
   win.document.close(); win.print();
 }
 
