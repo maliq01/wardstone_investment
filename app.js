@@ -1211,6 +1211,19 @@ async function submitDeposit() {
   if (btn) { btn.disabled = true; btn.textContent = 'Submitting...'; }
 
   try {
+    // Upload the receipt (if any) BEFORE creating the transaction, keyed off
+    // the reference rather than the transaction id — this lets us include
+    // receipt_path directly in the initial insert below. Investors are only
+    // allowed to INSERT their own transactions under RLS, not UPDATE them
+    // afterward, so attaching it at creation time avoids that restriction
+    // entirely instead of fighting it with a follow-up UPDATE.
+    let receiptPath = null;
+    if (depositReceipt && depositReceipt.data) {
+      try {
+        receiptPath = await uploadDocToStorage(u.id, 'receipt_' + ref, depositReceipt.data, depositReceipt.name, depositReceipt.type);
+      } catch (e) { console.warn('Receipt upload failed:', e); }
+    }
+
     // Write PENDING transaction to Supabase — NOT approved yet
     const txn = await db_createTransaction({
       investor_id: u.id,
@@ -1220,24 +1233,9 @@ async function submitDeposit() {
       status: 'pending',
       method,
       reference: ref,
-      notes: notes || null
+      notes: notes || null,
+      receipt_path: receiptPath
     });
-
-    // FIX M2: Store receipt in Supabase Storage, not localStorage.
-    // depositReceipt holds the file in memory until this point only.
-    if (depositReceipt && depositReceipt.data) {
-      try {
-        const receiptPath = await uploadDocToStorage(u.id, 'receipt_' + txn.id, depositReceipt.data, depositReceipt.name, depositReceipt.type);
-        // Persist the path so admins can actually retrieve the file later —
-        // previously this was uploaded but the path was discarded, so there
-        // was no way to find it again from the admin UI.
-        try {
-          await db_updateTransaction(txn.id, { receipt_path: receiptPath });
-        } catch (colErr) {
-          console.warn('Could not save receipt_path (column may not exist yet on transactions table):', colErr);
-        }
-      } catch (e) { console.warn('Receipt upload failed:', e); }
-    }
 
     await db_writeAudit(u.id, u.email, 'DEPOSIT_REQUESTED', 'transaction', txn.id, `$${amt} via ${method} — Ref: ${ref}`);
     Log.financial('DEPOSIT_REQUESTED', { investor_id: u.id, amount: amt, method, ref });
